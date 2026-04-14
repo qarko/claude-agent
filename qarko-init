@@ -1,8 +1,13 @@
 #!/bin/bash
-# qarko-init — 전체 개발환경 초기화/복구
-# 사용법: qarko-init
+# qarko-init — claude-code 서버 원-커맨드 복구
+# 사용법: SSH 접속 후 tmux 세션에서 `qarko-init`
 #
-# SSH 접속 후 tmux main 세션에서 이 명령어 하나로 전체 복원.
+# 수행 내용:
+#   1. dev-env-backup 레포 clone/pull
+#   2. restore.sh 실행 (메모리, 프로젝트, CLAUDE.md, 에이전트 복원)
+#   3. Claude Code CLI 설치 (npm -g, sudo)
+#   4. Bun 설치 (claude 유저 홈)
+#   5. 완료 안내
 
 set -e
 
@@ -26,64 +31,85 @@ echo -e "${BLUE}║       qarko 개발환경 복구 시작        ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
 echo ""
 
-# ── 1. dev-env-backup 클론 또는 pull ────────────────────────────────────
-log "[1/4] dev-env-backup 동기화..."
+# ── 1. dev-env-backup 동기화 ────────────────────────────────────────────
+log "[1/5] dev-env-backup 동기화..."
 
+REPO_URL="https://github.com/qarko/dev-env-backup.git"
+
+# GITHUB_TOKEN은 Authorization 헤더로만 전달 — URL에 박으면 .git/config와 프로세스
+# 리스트에 영구 저장되어 볼륨에 남는다.
 if [ -n "${GITHUB_TOKEN}" ]; then
-    CLONE_URL="https://${GITHUB_TOKEN}@github.com/qarko/dev-env-backup.git"
+    GIT_AUTH=(-c "http.extraHeader=Authorization: bearer ${GITHUB_TOKEN}")
 else
-    CLONE_URL="https://github.com/qarko/dev-env-backup.git"
+    GIT_AUTH=()
 fi
 
 if [ -d "$BACKUP_DIR/.git" ]; then
     log "  기존 클론 발견 — pull 실행..."
-    git -C "$BACKUP_DIR" pull --ff-only origin main 2>&1 || \
-        git -C "$BACKUP_DIR" pull --ff-only origin master 2>&1 || \
-        warn "  pull 실패 — 로컬 버전 사용"
+    git "${GIT_AUTH[@]}" -C "$BACKUP_DIR" pull --ff-only origin main 2>&1 \
+        || git "${GIT_AUTH[@]}" -C "$BACKUP_DIR" pull --ff-only origin master 2>&1 \
+        || warn "  pull 실패 — 로컬 버전 사용"
 else
     log "  dev-env-backup 클론 중..."
-    git clone --depth=1 "$CLONE_URL" "$BACKUP_DIR" || {
+    if ! git "${GIT_AUTH[@]}" clone --depth=1 "$REPO_URL" "$BACKUP_DIR"; then
         err "dev-env-backup 클론 실패."
-        err "GITHUB_TOKEN 환경변수를 설정하거나 수동으로 클론하세요."
+        err "private 레포면 GITHUB_TOKEN 환경변수를 Railway에 설정하세요."
         exit 1
-    }
+    fi
 fi
 success "dev-env-backup 준비 완료"
 
-# ── 2. restore.sh 실행 ───────────────────────────────────────────────────
-log "[2/4] restore.sh 실행..."
-cd "$BACKUP_DIR"
-
-if [ -f "restore.sh" ]; then
-    bash restore.sh
-    success "복원 완료"
+# ── 2. restore.sh 실행 ──────────────────────────────────────────────────
+log "[2/5] restore.sh 실행..."
+if [ -f "$BACKUP_DIR/restore.sh" ]; then
+    bash "$BACKUP_DIR/restore.sh"
+    success "메모리/프로젝트/CLAUDE.md 복원 완료"
 else
     err "restore.sh를 찾을 수 없습니다: $BACKUP_DIR/restore.sh"
     exit 1
 fi
 
-# ── 3. 메모리 최신화 (qarko/memory 레포가 별도 존재하는 경우) ───────────
-log "[3/4] 메모리 최신화 확인..."
-MEMORY_DIR="$HOME_DIR/.claude/projects/-home-claude/memory"
-
-if [ -d "$MEMORY_DIR" ]; then
-    FILE_COUNT=$(ls "$MEMORY_DIR"/*.md 2>/dev/null | wc -l)
-    success "메모리 디렉토리 확인 ($FILE_COUNT개 파일)"
+# ── 3. Claude Code CLI 설치 (root 글로벌) ───────────────────────────────
+log "[3/5] Claude Code CLI 설치 상태 확인..."
+if command -v claude >/dev/null 2>&1; then
+    success "claude CLI 이미 설치됨: $(command -v claude)"
 else
-    warn "메모리 디렉토리 없음 — restore.sh가 정상 실행되었는지 확인하세요"
+    log "  npm install -g @anthropic-ai/claude-code (sudo)..."
+    if sudo npm install -g @anthropic-ai/claude-code; then
+        success "claude CLI 설치 완료"
+    else
+        warn "claude CLI 설치 실패 — 수동 설치 필요"
+    fi
 fi
 
-# ── 4. tmux 세션 확인 및 안내 ────────────────────────────────────────────
-log "[4/4] tmux 세션 상태 확인..."
+# ── 4. Bun 설치 (claude 유저 홈) ────────────────────────────────────────
+log "[4/5] Bun 런타임 설치 상태 확인..."
+if [ -x "$HOME_DIR/.bun/bin/bun" ]; then
+    success "Bun 이미 설치됨: $HOME_DIR/.bun/bin/bun"
+else
+    log "  bun.sh 설치 스크립트 실행..."
+    if curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh \
+        && bash /tmp/bun-install.sh; then
+        rm -f /tmp/bun-install.sh
+        success "Bun 설치 완료"
+    else
+        rm -f /tmp/bun-install.sh
+        warn "Bun 설치 실패 — 수동 설치 필요"
+    fi
+fi
 
+# ── 5. tmux 세션 확인 ───────────────────────────────────────────────────
+log "[5/5] tmux 세션 상태 확인..."
 if command -v tmux &>/dev/null; then
-    tmux new-session -d -s main -c "$HOME_DIR" 2>/dev/null && \
-        success "tmux main 세션 생성" || \
-        success "tmux main 세션 이미 실행 중"
+    tmux has-session -t main 2>/dev/null \
+        && success "tmux main 세션 실행 중" \
+        || { tmux new-session -d -s main -c "$HOME_DIR" && success "tmux main 세션 생성"; }
 
-    tmux new-session -d -s swiss-vp -c "$HOME_DIR/qarko-site" 2>/dev/null && \
-        success "tmux swiss-vp 세션 생성" || \
-        warn "swiss-vp 세션 이미 존재하거나 qarko-site 없음"
+    if [ -d "$HOME_DIR/qarko-site" ]; then
+        tmux has-session -t swiss-vp 2>/dev/null \
+            && success "tmux swiss-vp 세션 실행 중" \
+            || { tmux new-session -d -s swiss-vp -c "$HOME_DIR/qarko-site" && success "tmux swiss-vp 세션 생성"; }
+    fi
 fi
 
 echo ""
@@ -92,7 +118,10 @@ echo -e "${GREEN}║           복구 완료!                  ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
 echo ""
 echo "다음 단계:"
-echo "  1. tmux attach -t main"
-echo "  2. claude --dangerously-skip-permissions 실행"
-echo "  3. '개발환경 복구 완료. 메모리 읽고 상태 확인해줘' 입력"
+echo "  1. tmux attach -t main             # 사장 세션"
+echo "  2. claude --dangerously-skip-permissions"
+echo ""
+echo "  부사장 세션:"
+echo "     tmux attach -t swiss-vp"
+echo "     cd ~/qarko-site && claude --dangerously-skip-permissions"
 echo ""
