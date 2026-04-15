@@ -83,10 +83,21 @@ else
 fi
 
 # ── 4. Bun 설치 (claude 유저 홈) ────────────────────────────────────────
+# Bun은 텔레그램/디스코드 MCP 플러그인 실행에 필수 (bun run --cwd ...).
+# 미설치 시 채널 MCP 서버가 기동하지 못해 봇이 메시지 수신 못 함.
 log "[4/5] Bun 런타임 설치 상태 확인..."
 if [ -x "$HOME_DIR/.bun/bin/bun" ]; then
     success "Bun 이미 설치됨: $HOME_DIR/.bun/bin/bun"
 else
+    # bun 설치 스크립트는 unzip 필수. 없으면 조용히 실패하므로 먼저 보장.
+    if ! command -v unzip >/dev/null 2>&1; then
+        log "  unzip 미설치 — apt로 설치..."
+        sudo apt-get update -y >/dev/null 2>&1 || warn "  apt update 실패"
+        sudo apt-get install -y unzip >/dev/null 2>&1 \
+            && success "  unzip 설치 완료" \
+            || warn "  unzip 설치 실패 — bun 설치도 실패할 수 있음"
+    fi
+
     log "  bun.sh 설치 스크립트 실행..."
     if curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh \
         && bash /tmp/bun-install.sh; then
@@ -94,7 +105,7 @@ else
         success "Bun 설치 완료"
     else
         rm -f /tmp/bun-install.sh
-        warn "Bun 설치 실패 — 수동 설치 필요"
+        warn "Bun 설치 실패 — 수동 설치 필요 (텔레그램/디스코드 봇 동작 안 함)"
     fi
 fi
 
