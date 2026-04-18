@@ -107,10 +107,13 @@ if "$NEED_INIT"; then
     # claude 로 이양 (restore.sh 의 git 동작은 이후 SSH 사용자가 수행).
     BACKUP_REPO_DIR="/home/claude/dev-env-backup"
     if [ ! -d "$BACKUP_REPO_DIR/.git" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
-        log "Pre-cloning dev-env-backup (root with GITHUB_TOKEN, len=${#GITHUB_TOKEN})..."
-        if git -c "http.extraHeader=Authorization: bearer $GITHUB_TOKEN" \
-               clone --depth=50 https://github.com/qarko/dev-env-backup.git \
+        log "Pre-cloning dev-env-backup (root, GITHUB_TOKEN URL embed)..."
+        # URL embed 형식 (GitHub 공식 권장) — username x-access-token + token
+        if git clone --depth=50 \
+               "https://x-access-token:${GITHUB_TOKEN}@github.com/qarko/dev-env-backup.git" \
                "$BACKUP_REPO_DIR" 2>&1 | tee -a "$INIT_DIR/pre-clone.log"; then
+            # origin URL 에서 token 제거 (이후 git 명령은 사용자가 자체 자격증명으로 수행)
+            git -C "$BACKUP_REPO_DIR" remote set-url origin https://github.com/qarko/dev-env-backup.git
             chown -R claude:claude "$BACKUP_REPO_DIR"
             log "Pre-clone OK."
         else
