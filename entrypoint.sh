@@ -174,6 +174,11 @@ if "$NEED_INIT"; then
             fi
         " && log "qarko-init complete (image=$IMAGE_ID)." \
           || log "ERROR: qarko-init failed — check $INIT_DIR/logs/"
+        # 디버그: 실패 여부 관계없이 최근 restore.log 덤프 (Railway 로그 진단)
+        if [ -f "$INIT_DIR/restore.log" ]; then
+            echo "[entrypoint-bg] === restore.log tail 60 ==="
+            tail -60 "$INIT_DIR/restore.log" | sed 's|^|[restore.log] |'
+        fi
     ) &
 fi
 
