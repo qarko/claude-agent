@@ -48,9 +48,12 @@ RUN curl -fsSL https://railway.com/install.sh -o /tmp/railway-install.sh \
     && sh /tmp/railway-install.sh \
     && rm -f /tmp/railway-install.sh
 
-# ── 5. Bun (이미지 고정 경로) ─────────────────────────────────────────────
+# ── 5. Bun (이미지 고정 경로 + /usr/local/bin symlink) ───────────────────
 # Bun 설치 스크립트가 적절한 권한 설정. 추가 chmod 불필요.
-RUN curl -fsSL https://bun.sh/install | bash
+# sudo secure_path 는 /opt/bun/bin 을 무시하므로 /usr/local/bin 에 symlink 추가.
+RUN curl -fsSL https://bun.sh/install | bash \
+    && ln -sf /opt/bun/bin/bun /usr/local/bin/bun \
+    && ln -sf /opt/bun/bin/bunx /usr/local/bin/bunx
 
 # ── 6. Claude CLI 전역 설치 (NPM_CONFIG_PREFIX=/usr/local) ───────────────
 RUN npm install -g @anthropic-ai/claude-code
