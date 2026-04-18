@@ -96,25 +96,23 @@ fi
 
 if "$NEED_INIT"; then
     log "Launching qarko-init in background as 'claude' (image=$IMAGE_ID)."
-    # 디버깅: ENV_FILE 상태 기록
-    log "ENV_FILE size=$(wc -c <"$ENV_FILE" 2>/dev/null || echo 0), lines=$(wc -l <"$ENV_FILE" 2>/dev/null || echo 0), GITHUB_TOKEN found=$(grep -c '^export GITHUB_TOKEN=' "$ENV_FILE" 2>/dev/null || echo 0)"
-    # 상태/플래그/락 파일 전부 claude 소유로 시작 상태 기록
+    # 상태 파일 초기화
     install -o claude -g claude -m 644 /dev/null "$STATUS_FILE"
-    su - claude -c "echo running > '$STATUS_FILE'"
+    echo running > "$STATUS_FILE"
+    chown claude:claude "$STATUS_FILE"
 
+    # Railway env 를 claude 유저 세션에도 확실히 전달하기 위해 sudo -E 사용.
+    # su - 는 login shell 이라도 자식 프로세스로 env export 가 환경에 따라 불안정.
+    # sudo -u claude -E 는 전체 env 를 명시적으로 보존한다.
     (
-        # flock + 상태 파일 쓰기를 전부 su(claude) 컨텍스트에서 수행.
-        # su - 가 login shell 이지만 -c 는 non-interactive 라 /etc/profile.d 자동
-        # source 가 보장되지 않음 → 명시적 source 로 Railway env 확실히 로드.
-        su - claude -c "
+        sudo -u claude -E -H bash -c "
             set -eo pipefail
-            [ -r /etc/profile.d/qarko-railway-env.sh ] && source /etc/profile.d/qarko-railway-env.sh
-            echo \"[bg] GITHUB_TOKEN len=\${#GITHUB_TOKEN}\" >&2
             exec 200>'$LOCK_FILE'
             if ! flock -n 200; then
                 echo '[entrypoint-bg] qarko-init already running (lock held)' >&2
                 exit 0
             fi
+            echo \"[bg] GITHUB_TOKEN len=\${#GITHUB_TOKEN}\" >&2
             if /usr/local/bin/qarko-init; then
                 echo '$IMAGE_ID' > '$INIT_FLAG'
                 echo ok > '$STATUS_FILE'
