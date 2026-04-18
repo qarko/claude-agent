@@ -109,6 +109,18 @@ if "$NEED_INIT"; then
     # git safe.directory 등록 (root 가 claude 소유 폴더 조작 허용)
     git config --global --add safe.directory "$BACKUP_REPO_DIR" 2>/dev/null || true
 
+    # claude 유저 git credential 파일 셋업 — qarko-init/restore.sh 가 수행하는
+    # git fetch/pull 에 자동 인증. Railway env GITHUB_TOKEN 필요.
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        install -o claude -g claude -m 600 /dev/null /home/claude/.git-credentials
+        echo "https://x-access-token:${GITHUB_TOKEN}@github.com" \
+            > /home/claude/.git-credentials
+        chown claude:claude /home/claude/.git-credentials
+        # global credential.helper=store (claude 유저 config)
+        sudo -u claude git config --global credential.helper store 2>/dev/null || true
+        log "claude git credential helper 등록 완료"
+    fi
+
     # pre-clone/pull 은 pipefail 영향 없이 독립 subshell 에서 처리 (실패해도
     # entrypoint 주 흐름에 영향 X; qarko-init 이 이후 재시도 가능).
     (
