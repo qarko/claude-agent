@@ -106,38 +106,40 @@ if "$NEED_INIT"; then
     # GITHUB_TOKEN 이 누락되는 회귀가 관측됨. root 가 직접 clone 하고 소유권만
     # claude 로 이양 (restore.sh 의 git 동작은 이후 SSH 사용자가 수행).
     BACKUP_REPO_DIR="/home/claude/dev-env-backup"
-    if [ -z "${GITHUB_TOKEN:-}" ]; then
-        log "WARN: GITHUB_TOKEN 없음 — 사전 clone/pull 불가"
-    elif [ ! -d "$BACKUP_REPO_DIR/.git" ]; then
-        log "Pre-cloning dev-env-backup (root, URL embed)..."
-        if git clone --depth=50 \
-               "https://x-access-token:${GITHUB_TOKEN}@github.com/qarko/dev-env-backup.git" \
-               "$BACKUP_REPO_DIR" 2>&1 | tee -a "$INIT_DIR/pre-clone.log"; then
+    # git safe.directory 등록 (root 가 claude 소유 폴더 조작 허용)
+    git config --global --add safe.directory "$BACKUP_REPO_DIR" 2>/dev/null || true
+
+    # pre-clone/pull 은 pipefail 영향 없이 독립 subshell 에서 처리 (실패해도
+    # entrypoint 주 흐름에 영향 X; qarko-init 이 이후 재시도 가능).
+    (
+        set +eo pipefail
+        if [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "[pre] WARN: GITHUB_TOKEN 없음"
+            exit 0
+        fi
+        if [ ! -d "$BACKUP_REPO_DIR/.git" ]; then
+            echo "[pre] cloning dev-env-backup"
+            git clone --depth=50 \
+                "https://x-access-token:${GITHUB_TOKEN}@github.com/qarko/dev-env-backup.git" \
+                "$BACKUP_REPO_DIR"
             git -C "$BACKUP_REPO_DIR" remote set-url origin \
                 https://github.com/qarko/dev-env-backup.git
             chown -R claude:claude "$BACKUP_REPO_DIR"
-            log "Pre-clone OK."
+            echo "[pre] clone OK"
         else
-            log "WARN: pre-clone failed — qarko-init 가 재시도"
+            echo "[pre] updating dev-env-backup to origin/main"
+            git -C "$BACKUP_REPO_DIR" remote set-url origin \
+                "https://x-access-token:${GITHUB_TOKEN}@github.com/qarko/dev-env-backup.git"
+            git -C "$BACKUP_REPO_DIR" fetch --quiet origin main
+            git -C "$BACKUP_REPO_DIR" reset --hard origin/main
+            git -C "$BACKUP_REPO_DIR" remote set-url origin \
+                https://github.com/qarko/dev-env-backup.git
+            chown -R claude:claude "$BACKUP_REPO_DIR"
+            echo "[pre] update OK"
         fi
-    else
-        # 존재 시 token embed URL 로 임시 전환 후 reset --hard origin/main (최신화).
-        log "dev-env-backup 존재 — 최신화 (root, URL embed)"
-        git -C "$BACKUP_REPO_DIR" remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/qarko/dev-env-backup.git"
-        if git -C "$BACKUP_REPO_DIR" fetch --quiet origin main 2>&1 \
-             | tee -a "$INIT_DIR/pre-pull.log" \
-             && git -C "$BACKUP_REPO_DIR" reset --hard origin/main 2>&1 \
-             | tee -a "$INIT_DIR/pre-pull.log"; then
-            log "최신화 완료."
-        else
-            log "WARN: 최신화 실패 — 기존 상태 유지"
-        fi
-        # URL 에서 token 제거 (로그/환경 노출 최소화)
-        git -C "$BACKUP_REPO_DIR" remote set-url origin \
-            https://github.com/qarko/dev-env-backup.git
-        chown -R claude:claude "$BACKUP_REPO_DIR"
-    fi
+    ) >>"$INIT_DIR/pre-clone.log" 2>&1 \
+        && log "dev-env-backup 준비 완료 (로그: $INIT_DIR/pre-clone.log)" \
+        || log "WARN: dev-env-backup pre-clone/pull 실패 (로그: $INIT_DIR/pre-clone.log)"
 
     # ── 5b. qarko-init 을 claude 세션에서 실행 ─────────────────────────────
     # 이 시점엔 dev-env-backup 이미 존재하므로 qarko-init 의 git clone 경로를
