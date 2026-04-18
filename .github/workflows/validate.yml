@@ -16,7 +16,7 @@ jobs:
         with:
           dockerfile: Dockerfile
           failure-threshold: warning
-          ignore: DL3008,DL3013   # apt/pip version pinning (P1 스콥 외)
+          ignore: DL3008,DL3013,DL3016   # apt/pip/npm 버전 pinning — Claude CLI 최신 보안 업데이트 유지가 우선
 
   shell-syntax:
     name: Shell syntax (bash -n + shellcheck)
