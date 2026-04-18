@@ -101,9 +101,30 @@ if "$NEED_INIT"; then
     echo running > "$STATUS_FILE"
     chown claude:claude "$STATUS_FILE"
 
-    # Railway env 를 claude 유저 세션에도 확실히 전달하기 위해 sudo -E 사용.
-    # su - 는 login shell 이라도 자식 프로세스로 env export 가 환경에 따라 불안정.
-    # sudo -u claude -E 는 전체 env 를 명시적으로 보존한다.
+    # ── 5a. dev-env-backup 사전 clone (root 권한, GITHUB_TOKEN 확실 사용) ──
+    # sudo/su 는 env_reset 또는 child-exec env 손실 이슈가 있어 claude 세션에서
+    # GITHUB_TOKEN 이 누락되는 회귀가 관측됨. root 가 직접 clone 하고 소유권만
+    # claude 로 이양 (restore.sh 의 git 동작은 이후 SSH 사용자가 수행).
+    BACKUP_REPO_DIR="/home/claude/dev-env-backup"
+    if [ ! -d "$BACKUP_REPO_DIR/.git" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+        log "Pre-cloning dev-env-backup (root with GITHUB_TOKEN, len=${#GITHUB_TOKEN})..."
+        if git -c "http.extraHeader=Authorization: bearer $GITHUB_TOKEN" \
+               clone --depth=50 https://github.com/qarko/dev-env-backup.git \
+               "$BACKUP_REPO_DIR" 2>&1 | tee -a "$INIT_DIR/pre-clone.log"; then
+            chown -R claude:claude "$BACKUP_REPO_DIR"
+            log "Pre-clone OK."
+        else
+            log "WARN: pre-clone failed — qarko-init 가 재시도"
+        fi
+    elif [ -d "$BACKUP_REPO_DIR/.git" ]; then
+        log "dev-env-backup 이미 존재 — 사전 clone 생략"
+    else
+        log "WARN: GITHUB_TOKEN 없음 — 사전 clone 불가"
+    fi
+
+    # ── 5b. qarko-init 을 claude 세션에서 실행 ─────────────────────────────
+    # 이 시점엔 dev-env-backup 이미 존재하므로 qarko-init 의 git clone 경로를
+    # 타지 않고 바로 restore.sh 로 진입 (GITHUB_TOKEN 미사용).
     (
         sudo -u claude -E -H bash -c "
             set -eo pipefail
@@ -112,7 +133,6 @@ if "$NEED_INIT"; then
                 echo '[entrypoint-bg] qarko-init already running (lock held)' >&2
                 exit 0
             fi
-            echo \"[bg] GITHUB_TOKEN len=\${#GITHUB_TOKEN}\" >&2
             if /usr/local/bin/qarko-init; then
                 echo '$IMAGE_ID' > '$INIT_FLAG'
                 echo ok > '$STATUS_FILE'
