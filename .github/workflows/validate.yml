@@ -1,0 +1,49 @@
+# .github/workflows/validate.yml in qarko/claude-agent repo
+# Runs on push to main/staging — blocks bad Dockerfile/entrypoint before Railway deploy.
+name: validate
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+
+jobs:
+  dockerfile-lint:
+    name: Dockerfile (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+          ignore: DL3008,DL3013   # apt/pip version pinning (P1 스콥 외)
+
+  shell-syntax:
+    name: Shell syntax (bash -n + shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n
+        run: |
+          bash -n entrypoint.sh
+          bash -n qarko-init
+      - name: shellcheck (pinned tag)
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: '.'
+          severity: warning
+          ignore_paths: >-
+            Dockerfile
+
+  docker-build:
+    name: Docker build (actual Dockerfile compilation)
+    runs-on: ubuntu-latest
+    # Dockerfile 또는 entrypoint.sh 변경 시에만 빌드 (CI 시간 절약)
+    if: contains(github.event.head_commit.modified, 'Dockerfile') || contains(github.event.head_commit.modified, 'entrypoint.sh') || github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (no-push)
+        run: |
+          docker build --no-cache --pull \
+            --build-arg IMAGE_BUILD_ID="ci-$(git rev-parse --short HEAD)" \
+            -t qarko-claude-agent:ci .
